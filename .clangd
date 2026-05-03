@@ -1,0 +1,6 @@
+CompileFlags:
+  Add:
+    - -Wno-unknown-warning-option
+Diagnostics:
+  UnusedIncludes: None
+  MissingIncludes: None
