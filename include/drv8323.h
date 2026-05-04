@@ -157,12 +157,12 @@ struct DRV8323Config {
 	bool cbcMode = true; // retry OCP on each PWM cycle
 
 	// ── Current sense amp ─────────────────────────────────────
-	DrvCsaGain csaGain = CSA_GAIN_20;
+	DrvCsaGain csaGain = CSA_GAIN_40;
 	bool csaEnabled = false; // set true when current sensing ready
 	bool csaCalA = false;	 // calibrate phase A offset
 	bool csaCalB = false;
 	bool csaCalC = false;
-	bool csaFet = true;				// true = low-side FET shunt reference
+	bool csaFet = false;				// true = low-side FET shunt reference
 	bool vrefDiv = true;			// true = VREF/2 reference
 	DrvSenLvl senLvl = SEN_LVL_1V0; // sense level threshold
 
@@ -178,7 +178,7 @@ struct DRV8323Config {
 class DRV8323 {
 public:
 	DRV8323(uint8_t csPin, DrvSPIClass& spi = SPI1)
-			: _cs(csPin), _spi(spi), _spiSettings(1000000, MSBFIRST, SPI_MODE1) {}
+			: _cs(csPin), _spi(spi), _spiSettings(100000, MSBFIRST, SPI_MODE1) {}
 
 	void begin(const DRV8323Config& cfg = DRV8323Config()) {
 		_cfg = cfg;
@@ -200,6 +200,7 @@ public:
 		write(0x05, buildOcpCtrl());
 		delay(1);
 		write(0x06, buildCsaCtrl());
+		Serial.println("before verify");
 		delay(1);
 	}
 
@@ -261,30 +262,32 @@ public:
 			serial.println("  OK");
 		} else {
 			serial.println();
-			if (fault & (1 << 10))
-				serial.println("    FAULT: OTW  – overtemp warning");
-			if (fault & (1 << 9))
-				serial.println("    FAULT: OTSD – overtemp shutdown");
-			if (fault & (1 << 8))
-				serial.println("    FAULT: UVLO – undervoltage");
-			if (fault & (1 << 7))
-				serial.println("    FAULT: GDF  – gate drive fault");
-			if (fault & (1 << 6))
-				serial.println("    FAULT: VDS  – overcurrent VDS");
-			if (vgs & (1 << 10))
-				serial.println("    VGS:   GDUV – gate drive UV");
-			if (vgs & (1 << 9))
-				serial.println("    VGS:   VGS_HA");
-			if (vgs & (1 << 8))
-				serial.println("    VGS:   VGS_LA");
-			if (vgs & (1 << 7))
-				serial.println("    VGS:   VGS_HB");
-			if (vgs & (1 << 6))
-				serial.println("    VGS:   VGS_LB");
-			if (vgs & (1 << 5))
-				serial.println("    VGS:   VGS_HC");
-			if (vgs & (1 << 4))
-				serial.println("    VGS:   VGS_LC");
+			if (fault & 0x0400) serial.println("  FAULT: Fault (global)");
+			if (fault & 0x0200) serial.println("  FAULT: VDS_OCP – overcurrent");
+			if (fault & 0x0100) serial.println("  FAULT: GDF – gate drive fault");
+			if (fault & 0x0080) serial.println("  FAULT: UVLO – undervoltage");
+			if (fault & 0x0040) serial.println("  FAULT: OTSD – overtemp shutdown");
+
+			if (fault & 0x0020) serial.println("  FAULT: VDS_HA");
+			if (fault & 0x0010) serial.println("  FAULT: VDS_LA");
+			if (fault & 0x0008) serial.println("  FAULT: VDS_HB");
+			if (fault & 0x0004) serial.println("  FAULT: VDS_LB");
+			if (fault & 0x0002) serial.println("  FAULT: VDS_HC");
+			if (fault & 0x0001) serial.println("  FAULT: VDS_LC");
+
+			// ---- FaultStatus2 ----
+			if (vgs & 0x0400) serial.println("  VGS: SA_OC");
+			if (vgs & 0x0200) serial.println("  VGS: SB_OC");
+			if (vgs & 0x0100) serial.println("  VGS: SC_OC");
+			if (vgs & 0x0080) serial.println("  VGS: OTW – overtemp warning");
+			if (vgs & 0x0040) serial.println("  VGS: CPUV");
+
+			if (vgs & 0x0020) serial.println("  VGS: VGS_HA");
+			if (vgs & 0x0010) serial.println("  VGS: VGS_LA");
+			if (vgs & 0x0008) serial.println("  VGS: VGS_HB");
+			if (vgs & 0x0004) serial.println("  VGS: VGS_LB");
+			if (vgs & 0x0002) serial.println("  VGS: VGS_HC");
+			if (vgs & 0x0001) serial.println("  VGS: VGS_LC");
 		}
 	}
 
@@ -326,13 +329,12 @@ private:
 	}
 
 	uint16_t transfer(uint16_t tx) {
-		uint8_t txBuf[2] = {(uint8_t)(tx >> 8), (uint8_t)(tx & 0xFF)};
-		uint8_t rxBuf[2] = {0, 0};
+		uint8_t buf[2] = {(uint8_t)(tx >> 8), (uint8_t)(tx & 0xFF)};
 		_spi.beginTransaction(_spiSettings);
 		digitalWrite(_cs, LOW);
-		_spi.transfer(txBuf, rxBuf, 2);
+		_spi.transfer(buf, 2);
 		digitalWrite(_cs, HIGH);
 		_spi.endTransaction();
-		return ((uint16_t)rxBuf[0] << 8) | rxBuf[1];
+		return ((uint16_t)buf[0] << 8) | buf[1];
 	}
 };

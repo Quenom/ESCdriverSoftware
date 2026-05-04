@@ -40,7 +40,7 @@
 #define VBattADC 28
 
 // vbus 1V = 370.37 mV at ADC  →  ratio = 1 / 0.37037 = 2.7
-#define VDIV_RATIO 2.7f
+#define VDIV_RATIO 2.8f
 // RP2040 ADC: 12-bit (0–4095), 3.3V reference
 #define ADC_REF 3.3f
 #define ADC_RES 4095.0f
@@ -66,15 +66,15 @@ DRV8323Config drvCfg() {
 	cfg.idriveN_HS = IDRIVEN_120MA;
 	cfg.idriveP_LS = IDRIVEP_60MA;
 	cfg.idriveN_LS = IDRIVEN_120MA;
-	cfg.tdrive = TDRIVE_2000NS;
+	cfg.tdrive = TDRIVE_1000NS;
 	cfg.deadTime = DEAD_100NS;
 
 	// ── Overcurrent protection ────────────────────────────────
 	cfg.ocpMode = OCP_REPORT_ONLY;
 	cfg.ocpRetry = OCP_RETRY_4MS;
 	cfg.ocpDeglitch = OCP_DEG_4US;
-	cfg.vdsLevel = VDS_0V45;
-	cfg.cbcMode = true;
+	cfg.vdsLevel = VDS_0V26;
+	cfg.cbcMode = false;
 
 	// ── Current sense amp ─────────────────────────────────────
 	cfg.csaGain = CSA_GAIN_20;
@@ -87,9 +87,9 @@ DRV8323Config drvCfg() {
 	cfg.senLvl = SEN_LVL_1V0;
 
 	// ── Misc ──────────────────────────────────────────────────
-	cfg.disableGateFaultReport = true;
+	cfg.disableGateFaultReport = false;
 	cfg.disableChargePumpUVLO = false;
-	cfg.reportOTW = false;
+	cfg.reportOTW = true;
 
 	return cfg;
 }
@@ -122,6 +122,7 @@ void initMotor(BLDCMotor& motor, BLDCDriver6PWM& driver, MagneticSensorSC60228& 
 
 	driver.voltage_power_supply = supplyVoltage;
 	driver.voltage_limit = supplyVoltage / 2;
+	driverA.dead_zone = 0.05f;
 	if (!driver.init()) {
 		Serial.println("Driver init failed!");
 		return;
@@ -132,15 +133,12 @@ void initMotor(BLDCMotor& motor, BLDCDriver6PWM& driver, MagneticSensorSC60228& 
 	motor.controller = MotionControlType::velocity_openloop;
 	motor.voltage_limit = 0.2f;
 	motor.velocity_limit = 10.0f;
-	motor.target = 6.28;
 
 	motor.useMonitoring(Serial);
 	if (!motor.init()) {
 		Serial.println("Motor init failed!");
 		return;
 	}
-	Serial.println("Motor ready!");
-	Serial.println("Set target velocity [rad/s]");
 	_delay(1000);
 }
 
@@ -167,32 +165,24 @@ void setup() {
 	SPI1.setSCK(SPI1_CLK);
 	SPI1.begin();
 
-	SPI.setRX(SPI0_RX);
-	SPI.setTX(SPI0_RX);
-	SPI.setSCK(SPI0_RX);
-	SPI.begin();
-
 	encoderA.init(reinterpret_cast<SPIClass*>(&SPI1));
-	// encoderB.init(reinterpret_cast<SPIClass*>(&SPI1));
+	encoderB.init(reinterpret_cast<SPIClass*>(&SPI1));
 
 	SimpleFOCDebug::enable(&Serial);
 
-	driverA.voltage_power_supply = 8.4; // TODO:change to vbus
-	driverA.voltage_limit = 3;
-	driverA.dead_zone = 0.05f;
-
-	//	initMotor(motorA, driverA, encoderA, vbus,drvA, SPI);
+	initMotor(motorA, driverA, encoderA, vbus, drvA, SPI);
 	//  initMotor(motorB, driverB, encoderB, vbus,drvb, SPI);
 
-	command.add('A', onMotorA, "motorA");
-	command.add('B', onMotorB, "motorB");
-	drvA.begin(drvCfg());
+	command.add('L', onMotorA, "motorA");
+	command.add('R', onMotorB, "motorB");
 }
 
 // ============================================================
 void loop() {
 
-	/*
+	encoderA.update();
+	encoderB.update();
+
 	motorA.loopFOC();
 	//  motorB.loopFOC();
 
@@ -202,10 +192,10 @@ void loop() {
 	motorA.monitor();
 	//  motorB.monitor();
 
-	*/
+	command.run();
+
 	if (drvA.hasFault()) {
 		drvA.printStatus(Serial);
 		drvA.clearFaults();
 	}
-	command.run();
 }
