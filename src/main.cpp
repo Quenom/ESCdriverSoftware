@@ -2,6 +2,7 @@
 #include <SPI.h>
 #include <SimpleFOC.h>
 #include <SimpleFOCDrivers.h>
+#include "SerialUSB.h"
 #include "encoders/sc60228/MagneticSensorSC60228.h"
 
 #include "drv8323.h"
@@ -62,10 +63,10 @@ DRV8323Config drvCfg() {
 	cfg.pwmMode = PWM_6x;
 
 	// ── Gate drive ────────────────────────────────────────────
-	cfg.idriveP_HS = IDRIVEP_60MA;
-	cfg.idriveN_HS = IDRIVEN_120MA;
-	cfg.idriveP_LS = IDRIVEP_60MA;
-	cfg.idriveN_LS = IDRIVEN_120MA;
+	cfg.idriveP_HS = IDRIVEP_260MA;
+	cfg.idriveN_HS = IDRIVEN_520MA;
+	cfg.idriveP_LS = IDRIVEP_260MA;
+	cfg.idriveN_LS = IDRIVEN_520MA;
 	cfg.tdrive = TDRIVE_1000NS;
 	cfg.deadTime = DEAD_100NS;
 
@@ -73,7 +74,7 @@ DRV8323Config drvCfg() {
 	cfg.ocpMode = OCP_REPORT_ONLY;
 	cfg.ocpRetry = OCP_RETRY_4MS;
 	cfg.ocpDeglitch = OCP_DEG_4US;
-	cfg.vdsLevel = VDS_0V26;
+	cfg.vdsLevel = VDS_0V45;
 	cfg.cbcMode = false;
 
 	// ── Current sense amp ─────────────────────────────────────
@@ -117,8 +118,8 @@ void onMotorB(char* cmd) { command.motor(&motorB, cmd); }
 // ============================================================
 void initMotor(BLDCMotor& motor, BLDCDriver6PWM& driver, MagneticSensorSC60228& encoder, float supplyVoltage,
 		DRV8323& drv, SPIClassRP2040& spi = SPI1) {
-	// encoder.init(reinterpret_cast<SPIClass*>(&spi));
-	// motor.linkSensor(&encoder);
+	encoder.init(reinterpret_cast<SPIClass*>(&spi));
+	motor.linkSensor(&encoder);
 
 	driver.voltage_power_supply = supplyVoltage;
 	driver.voltage_limit = supplyVoltage / 2;
@@ -130,15 +131,21 @@ void initMotor(BLDCMotor& motor, BLDCDriver6PWM& driver, MagneticSensorSC60228& 
 	motor.linkDriver(&driver);
 	drv.begin(drvCfg());
 
-	motor.controller = MotionControlType::velocity_openloop;
-	motor.voltage_limit = 0.2f;
+	motor.torque_controller = TorqueControlType::voltage;
+	motor.controller = MotionControlType::torque;
+	motor.voltage_limit = 6.0f;
 	motor.velocity_limit = 10.0f;
 
 	motor.useMonitoring(Serial);
+	motor.monitor_downsample= 100;
 	if (!motor.init()) {
 		Serial.println("Motor init failed!");
 		return;
 	}
+	if(!motor.initFOC()){
+    Serial.println("FOC init failed!");
+        return;
+    }
 	_delay(1000);
 }
 
@@ -151,7 +158,6 @@ void setup() {
 	while (!Serial)
 		;
 	delay(100);
-	SimpleFOCDebug::enable(&Serial);
 	analogReadResolution(12); // use full 12-bit range on RP2040
 
 	float vbus = readVbus();
@@ -165,12 +171,9 @@ void setup() {
 	SPI1.setSCK(SPI1_CLK);
 	SPI1.begin();
 
-	encoderA.init(reinterpret_cast<SPIClass*>(&SPI1));
-	encoderB.init(reinterpret_cast<SPIClass*>(&SPI1));
-
 	SimpleFOCDebug::enable(&Serial);
 
-	initMotor(motorA, driverA, encoderA, vbus, drvA, SPI);
+	initMotor(motorA, driverA, encoderA, vbus, drvA, SPI1);
 	//  initMotor(motorB, driverB, encoderB, vbus,drvb, SPI);
 
 	command.add('L', onMotorA, "motorA");
@@ -179,10 +182,6 @@ void setup() {
 
 // ============================================================
 void loop() {
-
-	encoderA.update();
-	encoderB.update();
-
 	motorA.loopFOC();
 	//  motorB.loopFOC();
 
@@ -190,10 +189,10 @@ void loop() {
 	//  motorB.move();
 
 	motorA.monitor();
+	
 	//  motorB.monitor();
 
 	command.run();
-
 	if (drvA.hasFault()) {
 		drvA.printStatus(Serial);
 		drvA.clearFaults();
