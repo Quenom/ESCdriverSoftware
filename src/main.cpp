@@ -2,10 +2,15 @@
 #include <SPI.h>
 #include <SimpleFOC.h>
 #include <SimpleFOCDrivers.h>
+#include <cstdint>
+#include "RP2040Support.h"
 #include "SerialUSB.h"
+#include "common/base_classes/CurrentSense.h"
 #include "encoders/sc60228/MagneticSensorSC60228.h"
 
 #include "drv8323.h"
+
+#include "ADC124S051.h"
 
 #define UARTTX 0
 #define UARTRX 1
@@ -78,11 +83,11 @@ DRV8323Config drvCfg() {
 	cfg.cbcMode = false;
 
 	// ── Current sense amp ─────────────────────────────────────
-	cfg.csaGain = CSA_GAIN_20;
-	cfg.csaEnabled = false;
-	cfg.csaCalA = false;
-	cfg.csaCalB = false;
-	cfg.csaCalC = false;
+	cfg.csaGain = CSA_GAIN_40;
+	cfg.csaEnabled = true;
+	cfg.csaCalA = true;
+	cfg.csaCalB = true;
+	cfg.csaCalC = true;
 	cfg.csaFet = true;
 	cfg.vrefDiv = true;
 	cfg.senLvl = SEN_LVL_1V0;
@@ -114,13 +119,46 @@ void onMotorA(char* cmd) { command.motor(&motorA, cmd); }
 void onMotorB(char* cmd) { command.motor(&motorB, cmd); }
 
 // ADC
+ADC124S051 adcek(SPI, SPI0_CS, 16 * 1000000);
+volatile uint16_t adc_buf[2][4];
+volatile uint8_t adc_write_idx = 0; // core 1 writes to this
+volatile uint8_t adc_read_idx = 0;
+static spin_lock_t* adc_lock;
+volatile bool adc_ready = false;
+inline float counts_to_amps_ch(uint8_t buf_idx, uint8_t ch) {
+	float v = adc_buf[buf_idx][ch] * (3.3f / 4095.0f);
+	return (v-(3.3f / 2.0f)) / (0.001f * 40.0f);
+}
+PhaseCurrent_s readCurrentSenseA() {
+	uint32_t save = spin_lock_blocking(adc_lock);
+	PhaseCurrent_s c;
+	uint8_t r = adc_read_idx;
+	c.a = counts_to_amps_ch(r, 1); // ch1 = phase A
+	c.b = counts_to_amps_ch(r, 0); // ch0 = phase B
+	c.c = 0;					   // not measured
+	spin_unlock(adc_lock, save);
+	return c;
+}
+PhaseCurrent_s readCurrentSenseB() {
+	uint32_t save = spin_lock_blocking(adc_lock);
+	PhaseCurrent_s c;
+	uint8_t r = adc_read_idx;
+	c.a = counts_to_amps_ch(r, 3);
+	c.b = counts_to_amps_ch(r, 2);
+	c.c = 0;
+	spin_unlock(adc_lock, save);
+	return c;
+}
+
+GenericCurrentSense currentSenseB(readCurrentSenseB);
+GenericCurrentSense currentSenseA(readCurrentSenseA);
 
 // ============================================================
 void initMotor(BLDCMotor& motor, BLDCDriver6PWM& driver, MagneticSensorSC60228& encoder, float supplyVoltage,
-		DRV8323& drv, SPIClassRP2040& spi = SPI1) {
+		DRV8323& drv, GenericCurrentSense& cs, SPIClassRP2040& spi = SPI1) {
 	encoder.init(reinterpret_cast<SPIClass*>(&spi));
 	motor.linkSensor(&encoder);
-
+	motor.voltage_sensor_align = 1.0f;
 	driver.voltage_power_supply = supplyVoltage;
 	driver.voltage_limit = supplyVoltage / 2;
 	driverA.dead_zone = 0.05f;
@@ -130,23 +168,39 @@ void initMotor(BLDCMotor& motor, BLDCDriver6PWM& driver, MagneticSensorSC60228& 
 	}
 	motor.linkDriver(&driver);
 	drv.begin(drvCfg());
+	delay(1000);
+	drv.disableCsaCalibration();
+	delay(1000);
+
+	//cs.init();
+	//motor.linkCurrentSense(&cs);
 
 	motor.torque_controller = TorqueControlType::voltage;
-	motor.controller = MotionControlType::torque;
+	motor.controller = MotionControlType::velocity;
 	motor.voltage_limit = 6.0f;
 	motor.velocity_limit = 10.0f;
-
+/*
+	motor.current_limit = 1.0f;
+    motor.PID_current_q.P = 0.1f;
+    motor.PID_current_q.I = 1.0f;
+    motor.PID_current_d.P = 0.1f;
+	motor.PID_current_d.I = 1.0f;
+	motor.PID_current_q.limit = 1.0f;
+    motor.PID_current_d.limit = 1.0f;
+*/
 	motor.useMonitoring(Serial);
-	motor.monitor_downsample= 100;
+	motor.monitor_downsample = 100;
+	motor.monitor_variables =
+			_MON_TARGET | _MON_VOLT_Q | _MON_VOLT_D | _MON_CURR_Q | _MON_CURR_D | _MON_VEL | _MON_ANGLE;
 	if (!motor.init()) {
 		Serial.println("Motor init failed!");
 		return;
 	}
-	if(!motor.initFOC()){
-    Serial.println("FOC init failed!");
-        return;
-    }
-	_delay(1000);
+	if (!motor.initFOC()) {
+		Serial.println("FOC init failed!");
+		return;
+	}
+	delay(1000);
 }
 
 // ============================================================
@@ -172,16 +226,42 @@ void setup() {
 	SPI1.begin();
 
 	SimpleFOCDebug::enable(&Serial);
-
-	initMotor(motorA, driverA, encoderA, vbus, drvA, SPI1);
+    while (!adc_ready);
+	initMotor(motorA, driverA, encoderA, vbus, drvA, currentSenseA, SPI1);
 	//  initMotor(motorB, driverB, encoderB, vbus,drvb, SPI);
 
 	command.add('L', onMotorA, "motorA");
 	command.add('R', onMotorB, "motorB");
 }
 
+void setup1() {
+	adc_lock = spin_lock_init(spin_lock_claim_unused(true));
+	SPI.setRX(SPI0_RX);
+	SPI.setTX(SPI0_TX);
+	SPI.setSCK(SPI0_CLK);
+	SPI.begin();
+
+	adcek.begin();
+	adc_ready = true;
+}
+
+void loop1() {
+	uint16_t tmp[ADC124S051_MAX_CHANNEL];
+	adcek.readAll(tmp); // satisfies the ref-to-array signature
+    uint32_t save = spin_lock_blocking(adc_lock);
+    uint8_t w = adc_write_idx;
+    for (int i = 0; i < ADC124S051_MAX_CHANNEL; i++)
+        adc_buf[w][i] = tmp[i];
+    adc_read_idx = w;
+    adc_write_idx ^= 1;
+    spin_unlock(adc_lock, save);
+}
+
 // ============================================================
 void loop() {
+
+	PhaseCurrent_s c = currentSenseA.getPhaseCurrents();
+    Serial.print(c.a); Serial.print("\t"); Serial.println(c.b);
 	motorA.loopFOC();
 	//  motorB.loopFOC();
 
@@ -189,9 +269,8 @@ void loop() {
 	//  motorB.move();
 
 	motorA.monitor();
-	
-	//  motorB.monitor();
 
+	//  motorB.monitor();
 	command.run();
 	if (drvA.hasFault()) {
 		drvA.printStatus(Serial);

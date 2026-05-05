@@ -162,7 +162,7 @@ struct DRV8323Config {
 	bool csaCalA = false;	 // calibrate phase A offset
 	bool csaCalB = false;
 	bool csaCalC = false;
-	bool csaFet = false;				// true = low-side FET shunt reference
+	bool csaFet = false;			// true = low-side FET shunt reference
 	bool vrefDiv = true;			// true = VREF/2 reference
 	DrvSenLvl senLvl = SEN_LVL_1V0; // sense level threshold
 
@@ -262,37 +262,73 @@ public:
 			serial.println("  OK");
 		} else {
 			serial.println();
-			if (fault & 0x0400) serial.println("  FAULT: Fault (global)");
-			if (fault & 0x0200) serial.println("  FAULT: VDS_OCP – overcurrent");
-			if (fault & 0x0100) serial.println("  FAULT: GDF – gate drive fault");
-			if (fault & 0x0080) serial.println("  FAULT: UVLO – undervoltage");
-			if (fault & 0x0040) serial.println("  FAULT: OTSD – overtemp shutdown");
+			if (fault & 0x0400)
+				serial.println("  FAULT: Fault (global)");
+			if (fault & 0x0200)
+				serial.println("  FAULT: VDS_OCP – overcurrent");
+			if (fault & 0x0100)
+				serial.println("  FAULT: GDF – gate drive fault");
+			if (fault & 0x0080)
+				serial.println("  FAULT: UVLO – undervoltage");
+			if (fault & 0x0040)
+				serial.println("  FAULT: OTSD – overtemp shutdown");
 
-			if (fault & 0x0020) serial.println("  FAULT: VDS_HA");
-			if (fault & 0x0010) serial.println("  FAULT: VDS_LA");
-			if (fault & 0x0008) serial.println("  FAULT: VDS_HB");
-			if (fault & 0x0004) serial.println("  FAULT: VDS_LB");
-			if (fault & 0x0002) serial.println("  FAULT: VDS_HC");
-			if (fault & 0x0001) serial.println("  FAULT: VDS_LC");
+			if (fault & 0x0020)
+				serial.println("  FAULT: VDS_HA");
+			if (fault & 0x0010)
+				serial.println("  FAULT: VDS_LA");
+			if (fault & 0x0008)
+				serial.println("  FAULT: VDS_HB");
+			if (fault & 0x0004)
+				serial.println("  FAULT: VDS_LB");
+			if (fault & 0x0002)
+				serial.println("  FAULT: VDS_HC");
+			if (fault & 0x0001)
+				serial.println("  FAULT: VDS_LC");
 
 			// ---- FaultStatus2 ----
-			if (vgs & 0x0400) serial.println("  VGS: SA_OC");
-			if (vgs & 0x0200) serial.println("  VGS: SB_OC");
-			if (vgs & 0x0100) serial.println("  VGS: SC_OC");
-			if (vgs & 0x0080) serial.println("  VGS: OTW – overtemp warning");
-			if (vgs & 0x0040) serial.println("  VGS: CPUV");
+			if (vgs & 0x0400)
+				serial.println("  VGS: SA_OC");
+			if (vgs & 0x0200)
+				serial.println("  VGS: SB_OC");
+			if (vgs & 0x0100)
+				serial.println("  VGS: SC_OC");
+			if (vgs & 0x0080)
+				serial.println("  VGS: OTW – overtemp warning");
+			if (vgs & 0x0040)
+				serial.println("  VGS: CPUV");
 
-			if (vgs & 0x0020) serial.println("  VGS: VGS_HA");
-			if (vgs & 0x0010) serial.println("  VGS: VGS_LA");
-			if (vgs & 0x0008) serial.println("  VGS: VGS_HB");
-			if (vgs & 0x0004) serial.println("  VGS: VGS_LB");
-			if (vgs & 0x0002) serial.println("  VGS: VGS_HC");
-			if (vgs & 0x0001) serial.println("  VGS: VGS_LC");
+			if (vgs & 0x0020)
+				serial.println("  VGS: VGS_HA");
+			if (vgs & 0x0010)
+				serial.println("  VGS: VGS_LA");
+			if (vgs & 0x0008)
+				serial.println("  VGS: VGS_HB");
+			if (vgs & 0x0004)
+				serial.println("  VGS: VGS_LB");
+			if (vgs & 0x0002)
+				serial.println("  VGS: VGS_HC");
+			if (vgs & 0x0001)
+				serial.println("  VGS: VGS_LC");
 		}
 	}
 
 	uint16_t read(uint8_t addr) { return transfer(0x8000 | ((addr & 0x7) << 11)) & 0x7FF; }
 	void write(uint8_t addr, uint16_t v) { transfer(((addr & 0x7) << 11) | (v & 0x7FF)); }
+
+	void enableCsaCalibration(bool calA = true, bool calB = true, bool calC = true) {
+		_cfg.csaCalA = calA;
+		_cfg.csaCalB = calB;
+		_cfg.csaCalC = calC;
+		write(0x06, buildCsaCtrl());
+	}
+
+	void disableCsaCalibration() {
+		_cfg.csaCalA = false;
+		_cfg.csaCalB = false;
+		_cfg.csaCalC = false;
+		write(0x06, buildCsaCtrl());
+	}
 
 private:
 	uint8_t _cs;
