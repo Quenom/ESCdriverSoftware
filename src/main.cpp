@@ -69,12 +69,12 @@ DRV8323Config drvCfg() {
 	cfg.pwmMode = PWM_6x;
 
 	// ── Gate drive ────────────────────────────────────────────
-	cfg.idriveP_HS = IDRIVEP_570MA;
-	cfg.idriveN_HS = IDRIVEN_1140MA;
-	cfg.idriveP_LS = IDRIVEP_570MA;
-	cfg.idriveN_LS = IDRIVEN_1140MA;
+	cfg.idriveP_HS = IDRIVEP_260MA;
+	cfg.idriveN_HS = IDRIVEN_280MA;
+	cfg.idriveP_LS = IDRIVEP_260MA;
+	cfg.idriveN_LS = IDRIVEN_280MA;
 	cfg.tdrive = TDRIVE_1000NS;
-	cfg.deadTime = DEAD_100NS;
+	cfg.deadTime = DEAD_400NS;
 
 	// ── Overcurrent protection ────────────────────────────────
 	cfg.ocpMode = OCP_REPORT_ONLY;
@@ -102,10 +102,10 @@ DRV8323Config drvCfg() {
 }
 
 // (SC60228 on SPI1) ----------------------------
-SPISettings encSPISettings(8000000, SC60228_BITORDER, SPI_MODE1);
+SPISettings encSPISettings(1000000, SC60228_BITORDER, SPI_MODE1);
 
-MagneticSensorSC60228 encoderA(ENCODER_A_CS, encSPISettings);
-MagneticSensorSC60228 encoderB(ENCODER_B_CS, encSPISettings);
+MagneticSensorSC60228 encoderA(ENCODER_A_CS);
+MagneticSensorSC60228 encoderB(ENCODER_B_CS);
 
 // ----- Motors & drivers --------------------------------------
 BLDCMotor motorA = BLDCMotor(7);
@@ -120,7 +120,7 @@ void onMotorA(char* cmd) { command.motor(&motorA, cmd); }
 void onMotorB(char* cmd) { command.motor(&motorB, cmd); }
 
 // ADC
-ADC124S051 adcek(SPI, SPI0_CS, 8 * 1000000);
+/*ADC124S051 adcek(SPI, SPI0_CS, 8 * 1000000);
 volatile uint16_t adc_buf[4];
 static spin_lock_t* adc_lock;
 volatile bool adc_ready = false;
@@ -178,7 +178,7 @@ PhaseCurrent_s readCurrentSenseA() {
 	c.a = 0;
 	return c;
 }
-/*
+
 PhaseCurrent_s readCurrentSenseB() {
 	uint32_t save = spin_lock_blocking(adc_lock);
 	PhaseCurrent_s c;
@@ -191,19 +191,19 @@ PhaseCurrent_s readCurrentSenseB() {
 }
 */
 // GenericCurrentSense currentSenseB(readCurrentSenseB);
-GenericCurrentSense currentSenseA(readCurrentSenseA);
+//GenericCurrentSense currentSenseA(readCurrentSenseA);
 
 // ============================================================
 void initMotor(BLDCMotor& motor, BLDCDriver6PWM& driver, MagneticSensorSC60228& encoder, float supplyVoltage,
-		DRV8323& drv, GenericCurrentSense& cs, SPIClassRP2040& spi = SPI1) {
+		DRV8323& drv, SPIClassRP2040& spi = SPI1) {
 	encoder.init(reinterpret_cast<SPIClass*>(&spi));
 	encoder.min_elapsed_time = 0.001;
 	motor.linkSensor(&encoder);
-	motor.voltage_sensor_align = 1.5f;
+	motor.voltage_sensor_align = 0.7f;
 	driver.voltage_power_supply = supplyVoltage;
 	driver.voltage_limit = supplyVoltage / 2;
 	// driver.pwm_frequency = 10000;
-	driverA.dead_zone = 0.05f;
+	driverA.dead_zone = 0.005f;
 	if (!driver.init()) {
 		Serial.println("Driver init failed!");
 		return;
@@ -213,17 +213,17 @@ void initMotor(BLDCMotor& motor, BLDCDriver6PWM& driver, MagneticSensorSC60228& 
 	delay(100);
 	drv.disableCsaCalibration();
 	delay(500);
-	calibrate_current_sensors();
+	//calibrate_current_sensors();
 	delay(5000);
 
 	// cs.init();
 	// motor.linkCurrentSense(&cs);
-	motor.zero_electric_angle = 5.95f;
+	motor.zero_electric_angle = 3.53f;
 	motor.sensor_direction = Direction::CCW;
 
 	motor.torque_controller = TorqueControlType::voltage;
 	motor.controller = MotionControlType::torque;
-	// motor.voltage_limit = 3.0f;
+	motor.voltage_limit = 3.0f;
 	// motor.KV_rating = 360;
 	// motor.phase_resistance = 0.25;
 	// motor.phase_inductance = 0.001; // 0,0001
@@ -234,8 +234,8 @@ void initMotor(BLDCMotor& motor, BLDCDriver6PWM& driver, MagneticSensorSC60228& 
 	motor.PID_velocity.P = 0.01f;
 	motor.PID_velocity.I = 0.5f;
 	motor.PID_velocity.D = 0.0f;
-	motor.PID_velocity.output_ramp = 500.0f;
-	motor.LPF_velocity.Tf = 0.001f;
+	//motor.PID_velocity.output_ramp = 500.0f;
+	motor.LPF_velocity.Tf = 0.0001f;
 	
 	/*
 		motor.current_limit = 1.0f;
@@ -250,9 +250,9 @@ void initMotor(BLDCMotor& motor, BLDCDriver6PWM& driver, MagneticSensorSC60228& 
 	motor.useMonitoring(Serial);
 	motor.monitor_downsample = 100;
 	// motor.monitor_variables =_MON_VOLT_Q | _MON_VOLT_D;
-	// motor.monitor_start_char = 'L';
-	// motor.monitor_end_char = 'L';
-	// command.verbose = VerboseMode::machine_readable;
+	//motor.monitor_start_char = 'L';
+	//motor.monitor_end_char = 'L';
+	//command.verbose = VerboseMode::machine_readable;
 	if (!motor.init()) {
 		Serial.println("Motor init failed!");
 		return;
@@ -287,15 +287,15 @@ void setup() {
 	SPI1.begin();
 
 	SimpleFOCDebug::enable(&Serial);
-	while (!adc_ready)
+	//while (!adc_ready)
 		;
-	initMotor(motorA, driverA, encoderA, vbus, drvA, currentSenseA, SPI1);
+	initMotor(motorA, driverA, encoderA, vbus, drvA, SPI1);
 	//  initMotor(motorB, driverB, encoderB, vbus,drvb, SPI);
 
 	command.add('L', onMotorA, "motorA");
 	command.add('R', onMotorB, "motorB");
 }
-
+/*
 void setup1() {
 	adc_lock = spin_lock_init(spin_lock_claim_unused(true));
 	SPI.setRX(SPI0_RX);
@@ -314,7 +314,7 @@ void loop1() {
 	for (int i = 0; i < 4; i++)
 		adc_buf[i] = tmp[i];
 	spin_unlock(adc_lock, save);
-}
+}*/
 
 // ============================================================
 void loop() {
@@ -324,7 +324,7 @@ void loop() {
 	motorA.move();
 	//   motorB.move();
 
-	motorA.monitor();
+	//LmotorA.monitor();
 
 	//  motorB.monitor();
 	command.run();
