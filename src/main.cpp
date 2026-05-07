@@ -6,6 +6,7 @@
 #include "RP2040Support.h"
 #include "SerialUSB.h"
 #include "common/base_classes/CurrentSense.h"
+#include "common/base_classes/Sensor.h"
 #include "encoders/sc60228/MagneticSensorSC60228.h"
 
 #include "drv8323.h"
@@ -88,7 +89,7 @@ DRV8323Config drvCfg() {
 	cfg.csaCalA = true;
 	cfg.csaCalB = true;
 	cfg.csaCalC = true;
-	cfg.csaFet = false;
+	cfg.csaFet = true;
 	cfg.vrefDiv = true;
 	cfg.senLvl = SEN_LVL_1V0;
 
@@ -101,7 +102,7 @@ DRV8323Config drvCfg() {
 }
 
 // (SC60228 on SPI1) ----------------------------
-SPISettings encSPISettings(10000000, SC60228_BITORDER, SPI_MODE1);
+SPISettings encSPISettings(8000000, SC60228_BITORDER, SPI_MODE1);
 
 MagneticSensorSC60228 encoderA(ENCODER_A_CS, encSPISettings);
 MagneticSensorSC60228 encoderB(ENCODER_B_CS, encSPISettings);
@@ -198,7 +199,7 @@ void initMotor(BLDCMotor& motor, BLDCDriver6PWM& driver, MagneticSensorSC60228& 
 	encoder.init(reinterpret_cast<SPIClass*>(&spi));
 	encoder.min_elapsed_time = 0.001;
 	motor.linkSensor(&encoder);
-	motor.voltage_sensor_align = 1.0f;
+	motor.voltage_sensor_align = 1.5f;
 	driver.voltage_power_supply = supplyVoltage;
 	driver.voltage_limit = supplyVoltage / 2;
 	// driver.pwm_frequency = 10000;
@@ -215,41 +216,43 @@ void initMotor(BLDCMotor& motor, BLDCDriver6PWM& driver, MagneticSensorSC60228& 
 	calibrate_current_sensors();
 	delay(5000);
 
-	//cs.init();
-	//motor.linkCurrentSense(&cs);
+	// cs.init();
+	// motor.linkCurrentSense(&cs);
+	motor.zero_electric_angle = 5.95f;
+	motor.sensor_direction = Direction::CCW;
 
 	motor.torque_controller = TorqueControlType::voltage;
-	motor.controller = MotionControlType::velocity;
-	motor.voltage_limit = 3.0f;
-	motor.KV_rating = 360;
-	motor.phase_resistance = 0.25;
-	motor.phase_inductance = 0.001; // 0,0001
+	motor.controller = MotionControlType::torque;
+	// motor.voltage_limit = 3.0f;
+	// motor.KV_rating = 360;
+	// motor.phase_resistance = 0.25;
+	// motor.phase_inductance = 0.001; // 0,0001
 
-	float bandwidth = _2PI * 150.0;
-	motor.tuneCurrentController(200);
-
+	// float bandwidth = _2PI * 150.0;
+	// motor.tuneCurrentController(200);
 	
 	motor.PID_velocity.P = 0.01f;
 	motor.PID_velocity.I = 0.5f;
 	motor.PID_velocity.D = 0.0f;
 	motor.PID_velocity.output_ramp = 500.0f;
 	motor.LPF_velocity.Tf = 0.001f;
-/*
-	motor.current_limit = 1.0f;
 	
-		motor.PID_current_q.P = 0.0f;
-		motor.PID_current_q.I = 0.0f;
-		motor.PID_current_d.P = 0.0f;
-		motor.PID_current_d.I = 0.0f;
-		motor.PID_current_q.limit = 1.0f;
-		motor.PID_current_d.limit = 1.0f;
-	*/
+	/*
+		motor.current_limit = 1.0f;
+
+			motor.PID_current_q.P = 0.0f;
+			motor.PID_current_q.I = 0.0f;
+			motor.PID_current_d.P = 0.0f;
+			motor.PID_current_d.I = 0.0f;
+			motor.PID_current_q.limit = 1.0f;
+			motor.PID_current_d.limit = 1.0f;
+		*/
 	motor.useMonitoring(Serial);
-	// motor.monitor_downsample = 100;
+	motor.monitor_downsample = 100;
 	// motor.monitor_variables =_MON_VOLT_Q | _MON_VOLT_D;
-	motor.monitor_start_char = 'L';
-	motor.monitor_end_char = 'L';
-	command.verbose = VerboseMode::machine_readable;
+	// motor.monitor_start_char = 'L';
+	// motor.monitor_end_char = 'L';
+	// command.verbose = VerboseMode::machine_readable;
 	if (!motor.init()) {
 		Serial.println("Motor init failed!");
 		return;
@@ -327,5 +330,6 @@ void loop() {
 	command.run();
 	if (drvA.hasFault()) {
 		drvA.printStatus(Serial);
+		drvA.clearFaults();
 	}
 }
