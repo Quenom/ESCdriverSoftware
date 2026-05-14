@@ -115,12 +115,12 @@ BLDCDriver6PWM driverA(A_X_H, A_X_L, A_Y_H, A_Y_L, A_Z_H, A_Z_L);
 BLDCDriver6PWM driverB(B_X_H, B_X_L, B_Y_H, B_Y_L, B_Z_H, B_Z_L);
 
 // ----- Commander ---------------------------------------------
-Commander command = Commander(Serial); // TODO:CHANGE ALL SERIALS TO MATCH
+Commander command = Commander(Serial1); // TODO:CHANGE ALL SERIALS TO MATCH
 void onMotorA(char* cmd) { command.motor(&motorA, cmd); }
 void onMotorB(char* cmd) { command.motor(&motorB, cmd); }
 
 // ADC
-/*ADC124S051 adcek(SPI, SPI0_CS, 8 * 1000000);
+ADC124S051 adcek(SPI, SPI0_CS, 8 * 1000000);
 volatile uint16_t adc_buf[4];
 static spin_lock_t* adc_lock;
 volatile bool adc_ready = false;
@@ -179,7 +179,7 @@ PhaseCurrent_s readCurrentSenseA() {
 	return c;
 }
 
-PhaseCurrent_s readCurrentSenseB() {
+/*PhaseCurrent_s readCurrentSenseB() {
 	uint32_t save = spin_lock_blocking(adc_lock);
 	PhaseCurrent_s c;
 	uint8_t r = adc_read_idx;
@@ -188,24 +188,23 @@ PhaseCurrent_s readCurrentSenseB() {
 	c.c = 0;
 	spin_unlock(adc_lock, save);
 	return c;
-}
-*/
+}*/
+
 // GenericCurrentSense currentSenseB(readCurrentSenseB);
-//GenericCurrentSense currentSenseA(readCurrentSenseA);
+GenericCurrentSense currentSenseA(readCurrentSenseA);
 
 // ============================================================
 void initMotor(BLDCMotor& motor, BLDCDriver6PWM& driver, MagneticSensorSC60228& encoder, float supplyVoltage,
 		DRV8323& drv, SPIClassRP2040& spi = SPI1) {
 	encoder.init(reinterpret_cast<SPIClass*>(&spi));
-	encoder.min_elapsed_time = 0.001;
 	motor.linkSensor(&encoder);
-	motor.voltage_sensor_align = 0.7f;
+	motor.voltage_sensor_align = 1.5f;
 	driver.voltage_power_supply = supplyVoltage;
-	driver.voltage_limit = supplyVoltage / 2;
+	driver.voltage_limit = supplyVoltage / 1.5f;
 	// driver.pwm_frequency = 10000;
 	driverA.dead_zone = 0.005f;
 	if (!driver.init()) {
-		Serial.println("Driver init failed!");
+		Serial1.println("Driver init failed!");
 		return;
 	}
 	motor.linkDriver(&driver);
@@ -213,33 +212,39 @@ void initMotor(BLDCMotor& motor, BLDCDriver6PWM& driver, MagneticSensorSC60228& 
 	delay(100);
 	drv.disableCsaCalibration();
 	delay(500);
-	//calibrate_current_sensors();
+	// calibrate_current_sensors();
 	delay(5000);
 
 	// cs.init();
 	// motor.linkCurrentSense(&cs);
-	motor.zero_electric_angle = 3.53f;
-	motor.sensor_direction = Direction::CCW;
+	// motor.zero_electric_angle = 3.53f;
+	// motor.sensor_direction = Direction::CCW;
 
-	motor.torque_controller = TorqueControlType::voltage;
-	motor.controller = MotionControlType::torque;
-	motor.voltage_limit = 3.0f;
-	// motor.KV_rating = 360;
-	// motor.phase_resistance = 0.25;
-	// motor.phase_inductance = 0.001; // 0,0001
+	motor.torque_controller = TorqueControlType::estimated_current;
+	motor.controller = MotionControlType::velocity;
+	motor.voltage_limit = supplyVoltage / 2;
+	motor.KV_rating = 360;
+	motor.phase_resistance = 0.25;
+	motor.phase_inductance = 0.000116; // 0,0001
 
 	// float bandwidth = _2PI * 150.0;
 	// motor.tuneCurrentController(200);
-	
-	motor.PID_velocity.P = 0.01f;
-	motor.PID_velocity.I = 0.5f;
-	motor.PID_velocity.D = 0.0f;
-	//motor.PID_velocity.output_ramp = 500.0f;
-	motor.LPF_velocity.Tf = 0.0001f;
-	
-	/*
-		motor.current_limit = 1.0f;
 
+	float max_velocity = 200.0;							// rad/s
+	float motor_frequency_hz = max_velocity / (2 * PI); // ~16 Hz
+	float filter_cutoff_hz = motor_frequency_hz * 5;	// ~80 Hz
+
+	// Tf = 1 / (2 * PI * f_cutoff)
+	motor.LPF_velocity.Tf = 1.0 / (2.0 * PI * filter_cutoff_hz);
+
+	motor.PID_velocity.P = 0.4f;
+	motor.PID_velocity.I = 5.0f;
+	motor.PID_velocity.D = 0.0f;
+	// motor.PID_velocity.output_ramp = 500.0f;
+	// motor.LPF_velocity.Tf = 0.0001f;
+
+	motor.current_limit = 10.0f;
+	/*
 			motor.PID_current_q.P = 0.0f;
 			motor.PID_current_q.I = 0.0f;
 			motor.PID_current_d.P = 0.0f;
@@ -247,18 +252,20 @@ void initMotor(BLDCMotor& motor, BLDCDriver6PWM& driver, MagneticSensorSC60228& 
 			motor.PID_current_q.limit = 1.0f;
 			motor.PID_current_d.limit = 1.0f;
 		*/
-	motor.useMonitoring(Serial);
+	motor.useMonitoring(Serial1);
 	motor.monitor_downsample = 100;
-	// motor.monitor_variables =_MON_VOLT_Q | _MON_VOLT_D;
+	//motor.monitor_variables = _MON_VOLT_Q | _MON_VOLT_D;
 	//motor.monitor_start_char = 'L';
 	//motor.monitor_end_char = 'L';
+	 motor.monitor_variables = _MON_TARGET | _MON_VEL;
 	//command.verbose = VerboseMode::machine_readable;
 	if (!motor.init()) {
-		Serial.println("Motor init failed!");
+		Serial1.println("Motor init failed!");
 		return;
 	}
+
 	if (!motor.initFOC()) {
-		Serial.println("FOC init failed!");
+		Serial1.println("FOC init failed!");
 		return;
 	}
 	delay(1000);
@@ -266,19 +273,18 @@ void initMotor(BLDCMotor& motor, BLDCDriver6PWM& driver, MagneticSensorSC60228& 
 
 // ============================================================
 void setup() {
-	// Serial1.setTX(UARTTX);
-	// Serial1.setRX(UARTRX);
-	// Serial1.begin(115200);
-	Serial.begin(115200);
-	while (!Serial)
+	Serial1.setTX(UARTTX);
+	Serial1.setRX(UARTRX);
+	Serial1.begin(115200);
+	while (!Serial1)
 		;
 	delay(100);
 	analogReadResolution(12); // use full 12-bit range on RP2040
 
 	float vbus = readVbus();
-	Serial.print("Vbus = ");
-	Serial.print(vbus, 2);
-	Serial.println(" V");
+	Serial1.print("Vbus = ");
+	Serial1.print(vbus, 2);
+	Serial1.println(" V");
 
 	// SPI1 – encoders (GP12/14/15)
 	SPI1.setRX(SPI1_RX);
@@ -286,9 +292,9 @@ void setup() {
 	SPI1.setSCK(SPI1_CLK);
 	SPI1.begin();
 
-	SimpleFOCDebug::enable(&Serial);
-	//while (!adc_ready)
-		;
+	SimpleFOCDebug::enable(&Serial1);
+	// while (!adc_ready);
+
 	initMotor(motorA, driverA, encoderA, vbus, drvA, SPI1);
 	//  initMotor(motorB, driverB, encoderB, vbus,drvb, SPI);
 
@@ -324,12 +330,12 @@ void loop() {
 	motorA.move();
 	//   motorB.move();
 
-	//LmotorA.monitor();
+	motorA.monitor();
 
 	//  motorB.monitor();
 	command.run();
 	if (drvA.hasFault()) {
-		drvA.printStatus(Serial);
+		drvA.printStatus(Serial1);
 		drvA.clearFaults();
 	}
 }
