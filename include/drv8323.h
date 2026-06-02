@@ -178,7 +178,7 @@ struct DRV8323Config {
 class DRV8323 {
 public:
 	DRV8323(uint8_t csPin, DrvSPIClass& spi = SPI1)
-			: _cs(csPin), _spi(spi), _spiSettings(100000, MSBFIRST, SPI_MODE1) {}
+			: _cs(csPin), _spi(spi), _spiSettings(10000, MSBFIRST, SPI_MODE1) {}
 
 	void begin(const DRV8323Config& cfg = DRV8323Config()) {
 		_cfg = cfg;
