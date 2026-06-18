@@ -2,37 +2,30 @@
 #include <Arduino.h>
 #include <SPI.h>
 
-// RP2040 earlephilhower core uses SPIClassRP2040
 using DrvSPIClass = SPIClassRP2040;
-
-// ═══════════════════════════════════════════════════════════════
-//  DRV8323 – User-friendly configuration
-//  Edit the enums and DRV8323Config struct below to configure.
-//  No need to touch raw register values.
-// ═══════════════════════════════════════════════════════════════
 
 // ── PWM mode ──────────────────────────────────────────────────
 enum DrvPwmMode {
-	PWM_6x = 0, // 6 independent INH/INL inputs
-	PWM_3x = 1, // 3 INH inputs, DRV handles low-side internally
-	PWM_1x = 2, // 1 input (direction + brake)
+	PWM_6x = 0,
+	PWM_3x = 1,
+	PWM_1x = 2,
 };
 
-// ── OCP (overcurrent) behaviour ───────────────────────────────
+// ── OCP (overcurrent) behaviour
 enum DrvOcpMode {
-	OCP_LATCH = 0,		 // latch fault – requires CLR_FLT to recover
-	OCP_RETRY = 1,		 // auto retry after TRETRY delay
-	OCP_REPORT_ONLY = 2, // assert nFAULT but keep driving
-	OCP_DISABLED = 3,	 // no overcurrent protection
+	OCP_LATCH = 0,
+	OCP_RETRY = 1,
+	OCP_REPORT_ONLY = 2,
+	OCP_DISABLED = 3,
 };
 
-// ── OCP retry time (when OCP_RETRY selected) ──────────────────
+// ── OCP retry time (when OCP_RETRY selected)
 enum DrvOcpRetry {
 	OCP_RETRY_4MS = 0,
 	OCP_RETRY_50US = 1,
 };
 
-// ── OCP deglitch time ─────────────────────────────────────────
+// ── OCP deglitch time
 enum DrvOcpDeglitch {
 	OCP_DEG_1US = 0,
 	OCP_DEG_2US = 1,
@@ -40,9 +33,9 @@ enum DrvOcpDeglitch {
 	OCP_DEG_8US = 3,
 };
 
-// ── VDS overcurrent threshold ─────────────────────────────────
+// ── VDS overcurrent threshold
 enum DrvVdsLevel {
-	VDS_0V06 = 0, // 0.06 V – very sensitive
+	VDS_0V06 = 0,
 	VDS_0V13 = 1,
 	VDS_0V20 = 2,
 	VDS_0V26 = 3,
@@ -60,7 +53,7 @@ enum DrvVdsLevel {
 	VDS_1V88 = 15,
 };
 
-// ── Dead time ─────────────────────────────────────────────────
+// ── Dead time
 enum DrvDeadTime {
 	DEAD_100NS = 0,
 	DEAD_200NS = 1,
@@ -68,7 +61,7 @@ enum DrvDeadTime {
 	DEAD_800NS = 3,
 };
 
-// ── Peak gate drive time ──────────────────────────────────────
+// ── Peak gate drive time
 enum DrvTdrive {
 	TDRIVE_500NS = 0,
 	TDRIVE_1000NS = 1,
@@ -76,8 +69,7 @@ enum DrvTdrive {
 	TDRIVE_4000NS = 3,
 };
 
-// ── Gate drive source current (IDRIVEP) ───────────────────────
-// Higher = faster turn-on, more ringing. Start low for testing.
+// ── Gate drive source current (IDRIVEP)
 enum DrvIdriveP {
 	IDRIVEP_10MA = 0,
 	IDRIVEP_30MA = 1,
@@ -97,7 +89,7 @@ enum DrvIdriveP {
 	IDRIVEP_1000MA = 15,
 };
 
-// ── Gate drive sink current (IDRIVEN) ─────────────────────────
+// ── Gate drive sink current (IDRIVEN)
 enum DrvIdriveN {
 	IDRIVEN_20MA = 0,
 	IDRIVEN_60MA = 1,
@@ -117,8 +109,7 @@ enum DrvIdriveN {
 	IDRIVEN_2000MA = 15,
 };
 
-// ── CSA gain ──────────────────────────────────────────────────
-// gain = 3.3V / (I_max * R_shunt)  e.g. 20A * 10mΩ → 16.5 → use 20x
+// ── CSA gain
 enum DrvCsaGain {
 	CSA_GAIN_5 = 0,
 	CSA_GAIN_10 = 1,
@@ -126,7 +117,7 @@ enum DrvCsaGain {
 	CSA_GAIN_40 = 3,
 };
 
-// ── CSA sense level threshold ─────────────────────────────────
+// ── CSA sense level threshold
 enum DrvSenLvl {
 	SEN_LVL_0V25 = 0,
 	SEN_LVL_0V5 = 1,
@@ -134,42 +125,39 @@ enum DrvSenLvl {
 	SEN_LVL_1V0 = 3,
 };
 
-// ═══════════════════════════════════════════════════════════════
-//  Configuration struct – fill this in, pass to DRV8323::begin()
-// ═══════════════════════════════════════════════════════════════
 struct DRV8323Config {
-	// ── PWM ───────────────────────────────────────────────────
+	// ── PWM
 	DrvPwmMode pwmMode = PWM_3x;
 
-	// ── Gate drive ────────────────────────────────────────────
-	DrvIdriveP idriveP_HS = IDRIVEP_60MA;  // HS source
-	DrvIdriveN idriveN_HS = IDRIVEN_120MA; // HS sink
-	DrvIdriveP idriveP_LS = IDRIVEP_60MA;  // LS source
-	DrvIdriveN idriveN_LS = IDRIVEN_120MA; // LS sink
+	// ── Gate drive
+	DrvIdriveP idriveP_HS = IDRIVEP_60MA;
+	DrvIdriveN idriveN_HS = IDRIVEN_120MA;
+	DrvIdriveP idriveP_LS = IDRIVEP_60MA;
+	DrvIdriveN idriveN_LS = IDRIVEN_120MA;
 	DrvTdrive tdrive = TDRIVE_2000NS;
 	DrvDeadTime deadTime = DEAD_100NS;
 
-	// ── Overcurrent protection ────────────────────────────────
+	// ── Overcurrent protection
 	DrvOcpMode ocpMode = OCP_REPORT_ONLY;
 	DrvOcpRetry ocpRetry = OCP_RETRY_4MS;
 	DrvOcpDeglitch ocpDeglitch = OCP_DEG_4US;
 	DrvVdsLevel vdsLevel = VDS_0V45;
-	bool cbcMode = true; // retry OCP on each PWM cycle
+	bool cbcMode = false; // retry OCP on each PWM cycle
 
-	// ── Current sense amp ─────────────────────────────────────
+	// ── Current sense amp
 	DrvCsaGain csaGain = CSA_GAIN_40;
-	bool csaEnabled = false; // set true when current sensing ready
-	bool csaCalA = false;	 // calibrate phase A offset
+	bool csaEnabled = false;
+	bool csaCalA = false;
 	bool csaCalB = false;
 	bool csaCalC = false;
-	bool csaFet = false;			// true = low-side FET shunt reference
-	bool vrefDiv = true;			// true = VREF/2 reference
-	DrvSenLvl senLvl = SEN_LVL_1V0; // sense level threshold
+	bool csaFet = false;
+	bool vrefDiv = true;
+	DrvSenLvl senLvl = SEN_LVL_1V0;
 
-	// ── Misc ──────────────────────────────────────────────────
-	bool disableGateFaultReport = true; // DIS_GDF
-	bool disableChargePumpUVLO = false; // DIS_CPUV
-	bool reportOTW = false;				// OTW_REP
+	// ── Misc
+	bool disableGateFaultReport = false;
+	bool disableChargePumpUVLO = false;
+	bool reportOTW = true;
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -177,8 +165,7 @@ struct DRV8323Config {
 // ═══════════════════════════════════════════════════════════════
 class DRV8323 {
 public:
-	DRV8323(uint8_t csPin, DrvSPIClass& spi = SPI1)
-			: _cs(csPin), _spi(spi), _spiSettings(10000, MSBFIRST, SPI_MODE1) {}
+	DRV8323(uint8_t csPin, DrvSPIClass& spi = SPI1) : _cs(csPin), _spi(spi), _spiSettings(10000, MSBFIRST, SPI_MODE1) {}
 
 	void begin(const DRV8323Config& cfg = DRV8323Config()) {
 		_cfg = cfg;
@@ -204,8 +191,6 @@ public:
 		delay(1);
 	}
 
-	// Returns true if all registers match expected values.
-	// Note: LOCK bits in GateDriveHS (0x03) are write-only and masked out.
 	bool verify(Stream& serial) {
 		bool ok = true;
 
@@ -216,7 +201,7 @@ public:
 			const char* name;
 		} regs[] = {
 				{0x02, buildDrvCtrl(), 0x7FF, "DriverControl"},
-				{0x03, buildGateHS(), 0x0FF, "GateDriveHS"}, // mask out LOCK bits [11:8]
+				{0x03, buildGateHS(), 0x0FF, "GateDriveHS"},
 				{0x04, buildGateLS(), 0x7FF, "GateDriveLS"},
 				{0x05, buildOcpCtrl(), 0x7FF, "OCPControl"},
 				{0x06, buildCsaCtrl(), 0x7FF, "CSAControl"},
@@ -248,7 +233,6 @@ public:
 		write(0x02, drvCtrl & ~1); // clear CLR_FLT
 	}
 
-	// Returns true if any real fault bits are set.
 	bool hasFault() { return (read(0x00) != 0) || (read(0x01) != 0); }
 
 	void printStatus(Stream& serial) {
@@ -336,7 +320,7 @@ private:
 	SPISettings _spiSettings;
 	DRV8323Config _cfg;
 
-	// ── Register builders ─────────────────────────────────────
+	// ── Register builders
 	uint16_t buildDrvCtrl() {
 		return (_cfg.disableChargePumpUVLO ? 1 : 0) << 9 | (_cfg.disableGateFaultReport ? 1 : 0) << 8
 				| (_cfg.reportOTW ? 1 : 0) << 7 | (uint16_t)_cfg.pwmMode << 5;
