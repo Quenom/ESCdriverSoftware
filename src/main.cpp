@@ -279,7 +279,7 @@ void initMotor(float supplyVoltage) {
 	motorA.torque_controller = TorqueControlType::foc_current;
 	motorA.controller = MotionControlType::velocity;
 	motorA.velocity_limit = 45;
-	motorA.voltage_limit = supplyVoltage / 2.0f;
+	motorA.voltage_limit = supplyVoltage / 1.5f;
 	motorA.KV_rating = 360;
 	motorA.phase_resistance = 0.49;
 	motorA.phase_inductance = 0.000116; // 0,0001
@@ -310,7 +310,7 @@ void initMotor(float supplyVoltage) {
 	motorB.torque_controller = TorqueControlType::foc_current;
 	motorB.controller = MotionControlType::velocity;
 	motorB.velocity_limit = 45;
-	motorB.voltage_limit = supplyVoltage / 2.0f;
+	motorB.voltage_limit = supplyVoltage / 1.5f;
 	motorB.KV_rating = 360;
 	motorB.phase_resistance = 0.49;
 	motorB.phase_inductance = 0.000116; // 0,0001
