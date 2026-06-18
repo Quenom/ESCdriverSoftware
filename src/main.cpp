@@ -146,7 +146,7 @@ BLDCDriver6PWM driverA(A_X_H, A_X_L, A_Y_H, A_Y_L, A_Z_H, A_Z_L);
 BLDCDriver6PWM driverB(B_X_H, B_X_L, B_Y_H, B_Y_L, B_Z_H, B_Z_L);
 
 // ----- Commander ---------------------------------------------
-Commander command = Commander(Serial); // TODO:CHANGE this
+Commander command = Commander(Serial1); // TODO:CHANGE this
 void onMotorA(char* cmd) { command.motor(&motorA, cmd); }
 void onMotorB(char* cmd) { command.motor(&motorB, cmd); }
 
@@ -279,7 +279,7 @@ void initMotor(float supplyVoltage) {
 	motorA.torque_controller = TorqueControlType::foc_current;
 	motorA.controller = MotionControlType::velocity;
 	motorA.velocity_limit = 45;
-	motorA.voltage_limit = supplyVoltage / 1.5f;
+	motorA.voltage_limit = supplyVoltage / 1.5;
 	motorA.KV_rating = 360;
 	motorA.phase_resistance = 0.49;
 	motorA.phase_inductance = 0.000116; // 0,0001
@@ -335,13 +335,13 @@ void initMotor(float supplyVoltage) {
 	motorB.PID_current_q.output_ramp = 1000.0f;
 	motorB.PID_current_d.output_ramp = 1000.0f;
 
-	motorA.useMonitoring(Serial);
+	motorA.useMonitoring(Serial1);
 	motorA.monitor_downsample = 10;
 	motorA.monitor_start_char = 'L';
 	motorA.monitor_end_char = 'L';
 	motorA.monitor_variables = _MON_TARGET | _MON_VEL;
 
-	motorB.useMonitoring(Serial);
+	motorB.useMonitoring(Serial1);
 	motorB.monitor_downsample = 10;
 	motorB.monitor_start_char = 'R';
 	motorB.monitor_end_char = 'R';
@@ -373,7 +373,7 @@ void setup() {
 	Serial1.setRX(UARTRX);
 	Serial1.begin(115200);
 	Serial.begin(115200);
-	while (!Serial)
+	while (!Serial1)
 		;
 	delay(100);
 	setupADC();
