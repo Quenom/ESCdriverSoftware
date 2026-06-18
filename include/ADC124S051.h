@@ -1,113 +1,127 @@
+
 #pragma once
-//
-//  FILE: ADC124S051.h
-//  PURPOSE: RP2040 library for ADC124S051 - 12-bit, 4-channel ADC (SPI)
-//  DEVICE: ADC124S051 (TI) - 12-bit, 4-channel, 200kSPS–1MSPS
-//  SPI:    MODE3, MSBFIRST, CS active LOW
-//
-//  Channel addressing bits [D4:D3] in 16-bit transfer:
-//    CH0 -> 0x0000
-//    CH1 -> 0x0800
-//    CH2 -> 0x1000
-//    CH3 -> 0x1800
-//
-//  NOTE: ADC124S051 returns data for channel N-1 while you address channel N.
-//        A dummy read is required on channel switch (or on first read).
-//        readAll() handles this correctly: 1 dummy + 4 real reads.
 
 #include <Arduino.h>
 #include <SPI.h>
+#include "hardware/spi.h"
+#include "hardware/gpio.h"
+#include "pico/stdlib.h"
 
-#define ADC124S051_MAX_VALUE    4095
-#define ADC124S051_MAX_CHANNEL  4
-#define ADC124S051_SPI_MODE     SPI_MODE3
-#define ADC124S051_DEFAULT_SPEED 1000000UL  // 1 MHz, safe default (max 8 MHz at 3.3V)
+#define ADC124S051_MAX_VALUE 4095
+#define ADC124S051_MAX_CHANNEL 4
 
-class ADC124S051
-{
+class ADC124S051 {
 public:
-	ADC124S051(SPIClassRP2040 &spi, uint8_t csPin, uint32_t speed = ADC124S051_DEFAULT_SPEED)
-		: _spi(&spi), _cs(csPin), _speed(speed),
-		_lastChannel(255), _count(0)
-	{
-		_settings = SPISettings(_speed, MSBFIRST, ADC124S051_SPI_MODE);
+	ADC124S051(spi_inst_t* spi, uint8_t csPin, uint32_t speed = 8000000UL)
+			: _spi(spi), _cs(csPin), _speed(speed), _lastChannel(255), _count(0) {}
+
+	void begin() {
+		// init SPI peripheral
+		spi_init(_spi, _speed);
+		spi_set_format(_spi,
+				16,			// 16 bits per transfer
+				SPI_CPOL_1, // MODE3: CPOL=1, CPHA=1
+				SPI_CPHA_1, SPI_MSB_FIRST);
+
+		// CS as fast GPIO
+		gpio_init(_cs);
+		gpio_set_dir(_cs, GPIO_OUT);
+		gpio_put(_cs, 1);
 	}
 
-	void begin()
-	{
-		pinMode(_cs, OUTPUT);
-		digitalWrite(_cs, HIGH);
+	// single channel read
+	// note: pipelined - result is for previously selected channel
+	uint16_t read(uint8_t ch) {
+		if (ch >= ADC124S051_MAX_CHANNEL)
+			return 0;
+
+		if (ch != _lastChannel) {
+			_lastChannel = ch;
+			_transfer(chAddr(ch)); // dummy to set channel
+		}
+
+		_count++;
+		return _transfer(chAddr(ch));
 	}
 
-	// Single channel read. Returns 12-bit value 0..4095.
-	// Issues a dummy read automatically on channel change.
-	uint16_t read(uint8_t ch)
-	{
-		if (ch >= ADC124S051_MAX_CHANNEL) return 0;
+	// read all 4 channels as fast as possible
+	// uses pipelined channel select - total: 5 transfers, 4 results
+	void readAll(uint16_t (&out)[ADC124S051_MAX_CHANNEL]) {
+		// precompute all control words
+		uint16_t cmd[ADC124S051_MAX_CHANNEL + 1];
+		for (uint8_t i = 0; i <= ADC124S051_MAX_CHANNEL; i++)
+			cmd[i] = chAddr(i % ADC124S051_MAX_CHANNEL);
 
-		if (ch != _lastChannel)
-		{
+		uint16_t raw[ADC124S051_MAX_CHANNEL + 1];
+
+		// CS low once, do all transfers back to back
+		// CS must pulse between conversions per datasheet (min 10ns)
+		// at 8MHz each transfer is 2us, CS pulse overhead is minimal
+		for (uint8_t i = 0; i <= ADC124S051_MAX_CHANNEL; i++) {
+			gpio_put(_cs, 0);
+			spi_write16_read16_blocking(_spi, &cmd[i], &raw[i], 1);
+			gpio_put(_cs, 1);
+			// no delay needed - gpio_put takes ~2 cycles = >10ns at 133MHz
+		}
+
+		// first result is garbage (pipeline warmup), skip it
+		for (uint8_t i = 0; i < ADC124S051_MAX_CHANNEL; i++)
+			out[i] = raw[i + 1] & 0x0FFF;
+
+		_count += ADC124S051_MAX_CHANNEL;
+		_lastChannel = 255;
+	}
+
+	// burst read: fill a buffer with repeated reads of one channel
+	// fastest possible - minimal overhead per sample
+	void readBurst(uint8_t ch, uint16_t* buf, uint16_t n) {
+		if (ch >= ADC124S051_MAX_CHANNEL)
+			return;
+
+		uint16_t cmd = chAddr(ch);
+		uint16_t dummy;
+
+		// pipeline prime
+		gpio_put(_cs, 0);
+		spi_write16_read16_blocking(_spi, &cmd, &dummy, 1);
+		gpio_put(_cs, 1);
+
+		for (uint16_t i = 0; i < n; i++) {
+			gpio_put(_cs, 0);
+			spi_write16_read16_blocking(_spi, &cmd, &buf[i], 1);
+			gpio_put(_cs, 1);
+			buf[i] &= 0x0FFF;
+		}
+
+		_count += n;
 		_lastChannel = ch;
-		transfer16(chAddr(ch));  // dummy - flushes previous channel
-		}
-
-		_count++;
-		return transfer16(chAddr(ch));
 	}
 
-	// Read all 4 channels: 1 dummy (ch0 select) + 4 real reads.
-	// Results written to out[0..3]. Returns false if out is null.
-	void readAll(uint16_t (&out)[ADC124S051_MAX_CHANNEL])
-	{
-		// Dummy read to select CH0 (result is stale, discard)
-		transfer16(chAddr(0));
-		_lastChannel = 0;
-
-		// Each transfer addresses the next channel while returning current channel data.
-		for (uint8_t ch = 0; ch < ADC124S051_MAX_CHANNEL; ch++)
-		{
-		uint8_t nextCh = (ch + 1) % ADC124S051_MAX_CHANNEL;
-			out[ch] = transfer16(chAddr(nextCh)) & 0x0FFF;
-		_count++;
-		}
-
-		_lastChannel = 255;  // force dummy on next single read() call
-	}
-
-	uint16_t maxValue()    const { return ADC124S051_MAX_VALUE; }
-	uint8_t  maxChannel()  const { return ADC124S051_MAX_CHANNEL; }
-	uint8_t  lastChannel() const { return _lastChannel; }
-	uint32_t count()       const { return _count; }
-
-	void setSPIspeed(uint32_t speed)
-	{
+	void setSPIspeed(uint32_t speed) {
 		_speed = speed;
-		_settings = SPISettings(_speed, MSBFIRST, ADC124S051_SPI_MODE);
+		spi_set_baudrate(_spi, speed);
 	}
 
-	uint32_t getSPIspeed() const { return _speed; }
+	uint32_t getSPIspeed() const { return spi_get_baudrate(_spi); }
+	uint16_t maxValue() const { return ADC124S051_MAX_VALUE; }
+	uint8_t maxChannel() const { return ADC124S051_MAX_CHANNEL; }
+	uint8_t lastChannel() const { return _lastChannel; }
+	uint32_t count() const { return _count; }
 
-	private:
+private:
+	spi_inst_t* _spi;
+	uint8_t _cs;
+	uint32_t _speed;
+	uint8_t _lastChannel;
+	uint32_t _count;
 
-	SPIClassRP2040 *_spi;
-	SPISettings     _settings;
-	uint8_t         _cs;
-	uint32_t        _speed;
-	uint8_t         _lastChannel;
-	uint32_t        _count;
+	static constexpr uint16_t chAddr(uint8_t ch) { return (uint16_t)ch << 11; }
 
-	static constexpr uint16_t chAddr(uint8_t ch)
-	{
-		return (uint16_t)ch << 11;  // 0x0000, 0x0800, 0x1000, 0x1800
-	}
-
-	uint16_t transfer16(uint16_t addr)
-	{
-		_spi->beginTransaction(_settings);
-		digitalWrite(_cs, LOW);
-		uint16_t data = _spi->transfer16(addr);
-		digitalWrite(_cs, HIGH);
-		_spi->endTransaction();
-		return data & 0x0FFF;  // mask to 12 bits
+	inline uint16_t _transfer(uint16_t cmd) {
+		uint16_t result;
+		gpio_put(_cs, 0);
+		spi_write16_read16_blocking(_spi, &cmd, &result, 1);
+		gpio_put(_cs, 1);
+		return result & 0x0FFF;
 	}
 };
